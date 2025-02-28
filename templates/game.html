@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arena Battle Royale</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #0f172a;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #game-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .player-stats, .scoreboard, .dead-overlay, .controls-info {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid #3b82f6;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+        }
+        .health-bar {
+            height: 10px;
+            background: #1e3a8a;
+            position: relative;
+            overflow: hidden;
+        }
+        .health-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            transition: width 0.3s ease;
+            width: 100%;
+        }
+        .scoreboard {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .dead-overlay {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+        .dead-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .respawn-button {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .kill-notification {
+            position: absolute;
+            top: 100px;
+            right: 20px;
+            padding: 10px 15px;
+            background: rgba(30, 58, 138, 0.8);
+            border-left: 4px solid #3b82f6;
+            color: white;
+            font-weight: bold;
+            border-radius: 4px;
+            animation: fadeIn 0.3s, fadeOut 0.3s 2.7s;
+            opacity: 0;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(20px); }
+        }
+        .joystick {
+            position: absolute;
+            bottom: 20px;
+            width: 100px;
+            height: 100px;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none;
+        }
+        .joystick-knob {
+            width: 40px;
+            height: 40px;
+            background-color: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            position: relative;
+        }
+        #joystick {
+            left: 20px;
+        }
+        #aim-joystick {
+            right: 20px;
+        }
+        #shoot-button {
+            position: absolute;
+            bottom: 20px;
+            right: 140px;
+            width: 60px;
+            height: 60px;
+            background-color: #ef4444;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+        }
+        .controls-info {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 20px;
+            border-radius: 8px;
+            z-index: 1000;
+            pointer-events: auto;
+            max-width: 400px;
+            text-align: center;
+        }
+        .controls-info.hidden {
+            display: none;
+        }
+        kbd {
+            background-color: #334155;
+            border-radius: 3px;
+            border: 1px solid #475569;
+            box-shadow: 0 1px 1px rgba(0,0,0,.2);
+            color: #f8fafc;
+            display: inline-block;
+            font-size: 12px;
+            font-family: monospace;
+            line-height: 1;
+            padding: 3px 6px;
+            margin: 0 2px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game-canvas"></canvas>
+    
+    <div id="game-overlay">
+        <!-- Player stats -->
+        <div class="player-stats absolute top-4 left-4 p-3 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+                <span id="player-name" class="font-bold text-lg">Player</span>
+                <span id="player-score" class="bg-blue-700 px-2 py-1 rounded text-sm">Score: 0</span>
+            </div>
+            <div class="health-bar rounded overflow-hidden">
+                <div id="health-bar-inner" class="health-bar-inner"></div>
+            </div>
+        </div>
+        
+        <!-- Scoreboard -->
+        <div class="scoreboard absolute top-4 right-4 p-3 rounded-lg">
+            <h3 class="text-center font-bold text-blue-400 mb-2">SCOREBOARD</h3>
+            <table class="w-full">
+                <thead>
+                    <tr>
+                        <th class="text-left text-blue-300">Player</th>
+                        <th class="text-right text-blue-300">Score</th>
+                    </tr>
+                </thead>
+                <tbody id="scoreboard-body">
+                    <!-- Scoreboard entries will be added here -->
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Death overlay -->
+        <div id="dead-overlay" class="dead-overlay absolute inset-0">
+            <h2 class="text-4xl font-bold text-red-500 mb-4">YOU DIED</h2>
+            <button id="respawn-button" class="respawn-button bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-xl">
+                RESPAWN
+            </button>
+        </div>
+        
+        <!-- Controls info overlay -->
+        <div id="controls-info" class="controls-info">
+            <h2 class="text-2xl font-bold text-blue-400 mb-4">CONTROLS</h2>
+            <div class="mb-4">
+                <h3 class="text-lg font-bold text-blue-300 mb-2">PC Controls</h3>
+                <p class="mb-2"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> - Move</p>
+                <p class="mb-2"><kbd>Mouse Movement</kbd> - Aim</p>
+                <p class="mb-2"><kbd>Space</kbd> or <kbd>Left Click</kbd> - Shoot</p>
+                <p class="mb-2"><kbd>Tab</kbd> - Show/Hide Controls</p>
+            </div>
+            <div class="mb-6">
+                <h3 class="text-lg font-bold text-blue-300 mb-2">Mobile Controls</h3>
+                <p class="mb-2">Left Joystick - Move</p>
+                <p class="mb-2">Right Joystick - Aim</p>
+                <p class="mb-2">Shoot Button - Fire</p>
+            </div>
+            <button id="start-game" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                START GAME
+            </button>
+        </div>
+        
+        <!-- Kill notifications will be added here -->
+        <div id="notifications-container"></div>
+    </div>
+    
+    <div id="joystick" class="joystick">
+        <div id="joystick-knob" class="joystick-knob"></div>
+    </div>
+    <div id="aim-joystick" class="joystick">
+        <div id="aim-joystick-knob" class="joystick-knob"></div>
+    </div>
+    <button id="shoot-button">FIRE</button>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.min.js"></script>
+    <script>
+        // Game variables
+        let canvas, ctx;
+        let socket;
+        let playerId, playerName;
+        let players = {};
+        let projectiles = {};
+        let arenaSize = 1000;
+        let viewportWidth, viewportHeight;
+        let cameraX = 0, cameraY = 0;
+        let keys = {};
+        let isDead = false;
+        let isTouchingMove = false;
+        let isTouchingAim = false;
+        let moveJoystickX = 0, moveJoystickY = 0;
+        let aimJoystickX = 0, aimJoystickY = 0;
+        let joystickKnob, aimJoystickKnob;
+        let mouseX = 0, mouseY = 0;
+        let isMouseAiming = false;
+        let gameStarted = false;
+
+        // Initialize the game
+        function init() {
+            // For demo purposes, set a random player name and ID if not present
+            if (!localStorage.getItem('player_id')) {
+                localStorage.setItem('player_id', 'player_' + Math.floor(Math.random() * 10000));
+            }
+            if (!localStorage.getItem('player_name')) {
+                localStorage.setItem('player_name', 'Player' + Math.floor(Math.random() * 100));
+            }
+            
+            playerId = localStorage.getItem('player_id');
+            playerName = localStorage.getItem('player_name');
+            
+            canvas = document.getElementById('game-canvas');
+            ctx = canvas.getContext('2d');
+            joystickKnob = document.getElementById('joystick-knob');
+            aimJoystickKnob = document.getElementById('aim-joystick-knob');
+            
+            // Show touch controls only on mobile devices
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            document.getElementById('joystick').style.display = isMobile ? 'flex' : 'none';
+            document.getElementById('aim-joystick').style.display = isMobile ? 'flex' : 'none';
+            document.getElementById('shoot-button').style.display = isMobile ? 'flex' : 'none';
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            setupInputHandlers();
+            setupTouchControls();
+            
+            document.getElementById('start-game').addEventListener('click', startGame);
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    toggleControlsInfo();
+                }
+            });
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            document.getElementById('controls-info').classList.add('hidden');
+            connectToServer();
+            gameStarted = true;
+        }
+
+        function toggleControlsInfo() {
+            const controlsInfo = document.getElementById('controls-info');
+            controlsInfo.classList.toggle('hidden');
+        }
+
+        function resizeCanvas() {
+            viewportWidth = window.innerWidth;
+            viewportHeight = window.innerHeight;
+            canvas.width = viewportWidth;
+            canvas.height = viewportHeight;
+        }
+
+        function setupInputHandlers() {
+            // Key events for movement
+            window.addEventListener('keydown', (e) => {
+                keys[e.key.toLowerCase()] = true;
+                if (e.key === ' ' && !isDead && gameStarted) {
+                    shoot();
+                }
+            });
+            window.addEventListener('keyup', (e) => {
+                keys[e.key.toLowerCase()] = false;
+            });
+            
+            // Mouse events for aiming and shooting
+            canvas.addEventListener('mousemove', (e) => {
+                if (gameStarted) {
+                    mouseX = e.clientX;
+                    mouseY = e.clientY;
+                    isMouseAiming = true;
+                }
+            });
+            
+            canvas.addEventListener('mousedown', (e) => {
+                if (e.button === 0 && !isDead && gameStarted) {
+                    shoot();
+                }
+            });
+            
+            canvas.addEventListener('mouseout', () => {
+                isMouseAiming = false;
+            });
+            
+            document.getElementById('respawn-button').addEventListener('click', respawn);
+        }
+
+        function setupTouchControls() {
+            const moveJoystick = document.getElementById('joystick');
+            const aimJoystick = document.getElementById('aim-joystick');
+            const shootButton = document.getElementById('shoot-button');
+
+            // Move joystick controls
+            moveJoystick.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isTouchingMove = true;
+                updateMoveJoystick(e.touches[0]);
+            });
+
+            moveJoystick.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (isTouchingMove) {
+                    updateMoveJoystick(e.touches[0]);
+                }
+            });
+
+            moveJoystick.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                isTouchingMove = false;
+                resetMoveJoystick();
+            });
+
+            // Aim joystick controls
+            aimJoystick.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isTouchingAim = true;
+                updateAimJoystick(e.touches[0]);
+            });
+
+            aimJoystick.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (isTouchingAim) {
+                    updateAimJoystick(e.touches[0]);
+                }
+            });
+
+            aimJoystick.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                isTouchingAim = false;
+                resetAimJoystick();
+            });
+
+            // Shoot button control
+            shootButton.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (gameStarted) {
+                    shoot();
+                }
+            });
+        }
+
+        function updateMoveJoystick(touch) {
+            const rect = document.getElementById('joystick').getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const deltaX = touch.clientX - centerX;
+            const deltaY = touch.clientY - centerY;
+            const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+            const maxDistance = rect.width / 2 - 20; // Account for knob size
+            const angle = Math.atan2(deltaY, deltaX);
+            const normalizedDistance = Math.min(distance, maxDistance) / maxDistance;
+
+            moveJoystickX = Math.cos(angle) * normalizedDistance;
+            moveJoystickY = Math.sin(angle) * normalizedDistance;
+
+            // Update knob position
+            const knobX = Math.cos(angle) * Math.min(distance, maxDistance);
+            const knobY = Math.sin(angle) * Math.min(distance, maxDistance);
+            joystickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+        }
+
+        function resetMoveJoystick() {
+            moveJoystickX = 0;
+            moveJoystickY = 0;
+            joystickKnob.style.transform = 'translate(0px, 0px)';
+        }
+
+        function updateAimJoystick(touch) {
+            const rect = document.getElementById('aim-joystick').getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            const deltaX = touch.clientX - centerX;
+            const deltaY = touch.clientY - centerY;
+            const distance = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+            const maxDistance = rect.width / 2 - 20; // Account for knob size
+            const angle = Math.atan2(deltaY, deltaX);
+            
+            aimJoystickX = deltaX;
+            aimJoystickY = deltaY;
+
+            // Update knob position
+            const knobX = Math.cos(angle) * Math.min(distance, maxDistance);
+            const knobY = Math.sin(angle) * Math.min(distance, maxDistance);
+            aimJoystickKnob.style.transform = `translate(${knobX}px, ${knobY}px)`;
+        }
+
+        function resetAimJoystick() {
+            aimJoystickX = 0;
+            aimJoystickY = 0;
+            aimJoystickKnob.style.transform = 'translate(0px, 0px)';
+        }
+
+        function connectToServer() {
+            socket = io();
+            socket.on('connect', () => {
+                console.log('Connected to server');
+                socket.emit('join_game', { player_id: playerId, name: playerName });
+            });
+            socket.on('game_state', (data) => {
+                players = data.players;
+                projectiles = data.projectiles;
+                arenaSize = data.arena_size;
+                updateScoreboard();
+            });
+            socket.on('new_player', (data) => {
+                players[data.id] = data;
+                updateScoreboard();
+                showNotification(`${data.name} joined the battle!`, 'blue');
+            });
+            socket.on('player_left', (data) => {
+                if (data.player_id in players) {
+                    showNotification(`${players[data.player_id].name} left the battle!`, 'gray');
+                    delete players[data.player_id];
+                    updateScoreboard();
+                }
+            });
+            socket.on('player_position', (data) => {
+                if (data.id in players) {
+                    players[data.id].x = data.x;
+                    players[data.id].y = data.y;
+                    players[data.id].angle = data.angle;
+                }
+            });
+            socket.on('new_projectile', (data) => {
+                projectiles[data.id] = data;
+            });
+            socket.on('remove_projectiles', (data) => {
+                for (const id of data.projectile_ids) {
+                    delete projectiles[id];
+                }
+            });
+            socket.on('player_status_update', (data) => {
+                for (const id in data.players) {
+                    if (id in players) {
+                        const oldHealth = players[id].health;
+                        const newHealth = data.players[id].health;
+                        players[id].health = newHealth;
+                        players[id].alive = data.players[id].alive;
+                        players[id].score = data.players[id].score;
+                        
+                        if (oldHealth > 0 && newHealth <= 0) {
+                            if (id === playerId) {
+                                handlePlayerDeath();
+                            } else {
+                                showNotification(`${players[id].name} was eliminated!`, 'red');
+                            }
+                        }
+                        
+                        if (id === playerId) {
+                            updateHealthBar();
+                            updatePlayerScore();
+                        }
+                    }
+                }
+                updateScoreboard();
+            });
+            socket.on('player_respawned', (data) => {
+                if (data.id in players) {
+                    players[data.id].x = data.x;
+                    players[data.id].y = data.y;
+                    players[data.id].health = data.health;
+                    players[data.id].alive = true;
+                    
+                    showNotification(`${players[data.id].name} respawned!`, 'green');
+                    
+                    if (data.id === playerId) {
+                        isDead = false;
+                        document.getElementById('dead-overlay').classList.remove('visible');
+                        updateHealthBar();
+                    }
+                }
+            });
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (gameStarted) {
+                if (playerId in players) {
+                    if (!isDead) {
+                        handlePlayerInput();
+                    }
+                    updateCamera();
+                    drawWorld();
+                    drawPlayers();
+                    drawProjectiles();
+                    updateProjectiles();
+                    checkCollisions();
+                }
+            } else {
+                // Draw a placeholder background
+                drawPlaceholderBackground();
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        function drawPlaceholderBackground() {
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw some grid lines
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+
+            for (let y = 0; y < canvas.height; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+        }
+
+        function handlePlayerInput() {
+            if (!(playerId in players) || !players[playerId].alive) return;
+            
+            let dx = 0, dy = 0;
+            const player = players[playerId];
+            const speed = 5;
+            
+            // Keyboard movement
+            if (keys['w'] || keys['arrowup']) dy -= speed;
+            if (keys['s'] || keys['arrowdown']) dy += speed;
+            if (keys['a'] || keys['arrowleft']) dx -= speed;
+            if (keys['d'] || keys['arrowright']) dx += speed;
+            
+            // Joystick movement (mobile)
+            if (isTouchingMove) {
+                dx = moveJoystickX * speed;
+                dy = moveJoystickY * speed;
+            }
+            
+            // Apply movement if there's any
+            if (dx !== 0 || dy !== 0) {
+                player.x = Math.max(30, Math.min(arenaSize - 30, player.x + dx));
+                player.y = Math.max(30, Math.min(arenaSize - 30, player.y + dy));
+                socket.emit('player_update', { player_id: playerId, x: player.x, y: player.y });
+            }
+
+            // Aim with mouse
+            if (isMouseAiming) {
+                const screenX = player.x - cameraX;
+                const screenY = player.y - cameraY;
+                const angle = Math.atan2(mouseY - screenY, mouseX - screenX);
+                player.angle = angle;
+                socket.emit('player_update', { player_id: playerId, angle: player.angle });
+            }
+            
+            // Aim with joystick
+            if (isTouchingAim && (aimJoystickX !== 0 || aimJoystickY !== 0)) {
+                const angle = Math.atan2(aimJoystickY, aimJoystickX);
+                player.angle = angle;
+                socket.emit('player_update', { player_id: playerId, angle: player.angle });
+            }
+        }
+
+        function updateCamera() {
+            if (!(playerId in players)) return;
+            const player = players[playerId];
+            cameraX = player.x - viewportWidth / 2;
+            cameraY = player.y - viewportHeight / 2;
+            cameraX = Math.max(0, Math.min(arenaSize - viewportWidth, cameraX));
+            cameraY = Math.max(0, Math.min(arenaSize - viewportHeight, cameraY));
+        }
+
+        function drawWorld() {
+            ctx.fillStyle = '#1e293b';
+            ctx.fillRect(0 - cameraX, 0 - cameraY, arenaSize, arenaSize);
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            const startX = Math.floor(cameraX / gridSize) * gridSize;
+            const startY = Math.floor(cameraY / gridSize) * gridSize;
+            const endX = Math.ceil((cameraX + viewportWidth) / gridSize) * gridSize;
+            const endY = Math.ceil((cameraY + viewportHeight) / gridSize) * gridSize;
+
+            for (let x = startX; x <= endX; x += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(x - cameraX, 0 - cameraY);
+                ctx.lineTo(x - cameraX, arenaSize - cameraY);
+                ctx.stroke();
+            }
+
+            for (let y = startY; y <= endY; y += gridSize) {
+                ctx.beginPath();
+                ctx.moveTo(0 - cameraX, y - cameraY);
+                ctx.lineTo(arenaSize - cameraX, y - cameraY);
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(0 - cameraX, 0 - cameraY, arenaSize, arenaSize);
+        }
+
+        function drawPlayers() {
+            for (const id in players) {
+                const player = players[id];
+                if (!player.alive) continue;
+                const screenX = player.x - cameraX;
+                const screenY = player.y - cameraY;
+                if (screenX < -50 || screenX > viewportWidth + 50 || screenY < -50 || screenY > viewportHeight + 50) {
+                    continue;
+                }
+                
+                // Draw player body
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, 20, 0, Math.PI * 2);
+                ctx.fillStyle = player.color || '#3b82f6';
+                ctx.fill();
+                
+                // Draw aiming direction
+                ctx.beginPath();
+                ctx.moveTo(screenX, screenY);
+                ctx.lineTo(screenX + Math.cos(player.angle) * 30, screenY + Math.sin(player.angle) * 30);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                // Draw player name
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#ffffff';
+                ctx.textAlign = 'center';
+                ctx.fillText(player.name, screenX, screenY - 30);
+                
+                // Draw health bar
+                const healthBarWidth = 40;
+                const healthBarHeight = 4;
+                const healthPercentage = player.health / 100;
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(screenX - healthBarWidth / 2, screenY - 25, healthBarWidth, healthBarHeight);
+                ctx.fillStyle = '#22c55e';
+                ctx.fillRect(screenX - healthBarWidth / 2, screenY - 25, healthBarWidth * healthPercentage, healthBarHeight);
+                
+                // Highlight current player
+                if (id === playerId) {
+                    ctx.beginPath();
+                    ctx.arc(screenX, screenY, 24, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function drawProjectiles() {
+            for (const id in projectiles) {
+                const projectile = projectiles[id];
+                const screenX = projectile.x - cameraX;
+                const screenY = projectile.y - cameraY;
+                if (screenX < -10 || screenX > viewportWidth + 10 || screenY < -10 || screenY > viewportHeight + 10) {
+                    continue;
+                }
+                
+                // Draw projectile body
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, 5, 0, Math.PI * 2);
+                ctx.fillStyle = (projectile.owner_id in players) ? players[projectile.owner_id].color || '#3b82f6' : '#3b82f6';
+                ctx.fill();
+                
+                // Draw projectile trail
+                ctx.beginPath();
+                ctx.moveTo(screenX, screenY);
+                ctx.lineTo(screenX - Math.cos(projectile.angle) * 10, screenY - Math.sin(projectile.angle) * 10);
+                ctx.strokeStyle = '#60a5fa';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function updateProjectiles() {
+            for (const id in projectiles) {
+                const projectile = projectiles[id];
+                projectile.x += Math.cos(projectile.angle) * 5;
+                projectile.y += Math.sin(projectile.angle) * 5;
+                if (projectile.x < 0 || projectile.x > arenaSize || projectile.y < 0 || projectile.y > arenaSize) {
+                    delete projectiles[id];
+                }
+            }
+        }
+
+        
+
+        function checkCollisions() {
+            for (const id in projectiles) {
+                const projectile = projectiles[id];
+                for (const playerId in players) {
+                    const player = players[playerId];
+                    if (!player.alive) continue;
+                    const distance = Math.sqrt((projectile.x - player.x) ** 2 + (projectile.y - player.y) ** 2);
+                    if (distance < 20) {
+                        player.health -= 10;
+                        delete projectiles[id];
+                        if (player.health <= 0) {
+                            player.alive = false;
+                            if (playerId === playerId) {
+                                handlePlayerDeath();
+                            } else {
+                                showNotification(`${player.name} was eliminated!`, 'red');
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function shoot() {
+            if (isDead) return;
+            const player = players[playerId];
+            if (!player || !player.alive) return;
+            socket.emit('shoot', { player_id: playerId, angle: player.angle });
+        }
+
+        function handlePlayerDeath() {
+            isDead = true;
+            document.getElementById('dead-overlay').classList.add('visible');
+        }
+
+        function respawn() {
+            socket.emit('respawn', { player_id: playerId });
+        }
+
+        function updateHealthBar() {
+            if (!(playerId in players)) return;
+            const healthPercentage = Math.max(0, players[playerId].health) / 100;
+            document.getElementById('health-bar-inner').style.width = `${healthPercentage * 100}%`;
+        }
+
+        function updatePlayerScore() {
+            if (!(playerId in players)) return;
+            document.getElementById('player-score').textContent = `Score: ${players[playerId].score}`;
+        }
+
+        function updateScoreboard() {
+            const scoreboardBody = document.getElementById('scoreboard-body');
+            const playersList = Object.values(players);
+            playersList.sort((a, b) => b.score - a.score);
+            scoreboardBody.innerHTML = '';
+            playersList.forEach(player => {
+                const row = document.createElement('tr');
+                if (player.id === playerId) {
+                    row.className = 'bg-blue-900 bg-opacity-50';
+                }
+                row.innerHTML = `
+                    <td class="text-left">
+                        <span class="inline-block w-3 h-3 rounded-full mr-2" style="background-color: ${player.color}"></span>
+                        ${player.name}
+                    </td>
+                    <td class="text-right">${player.score}</td>
+                `;
+                scoreboardBody.appendChild(row);
+            });
+            if (playerId in players) {
+                document.getElementById('player-name').textContent = players[playerId].name;
+            }
+        }
+
+        function showNotification(message, color = 'blue') {
+            const container = document.getElementById('notifications-container');
+            const notification = document.createElement('div');
+            notification.className = 'kill-notification';
+            notification.textContent = message;
+            switch (color) {
+                case 'red':
+                    notification.style.borderLeftColor = '#ef4444';
+                    break;
+                case 'green':
+                    notification.style.borderLeftColor = '#22c55e';
+                    break;
+                case 'blue':
+                    notification.style.borderLeftColor = '#3b82f6';
+                    break;
+                case 'gray':
+                    notification.style.borderLeftColor = '#94a3b8';
+                    break;
+                default:
+                    notification.style.borderLeftColor = '#3b82f6';
+            }
+            container.appendChild(notification);
+            setTimeout(() => {
+                notification.style.opacity = '1';
+            }, 10);
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        // Initialize game when DOM is loaded
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
