@@ -291,7 +291,7 @@
                     toggleControlsInfo();
                 }
             });
-            
+
             requestAnimationFrame(gameLoop);
         }
 
@@ -312,40 +312,70 @@
             canvas.width = viewportWidth;
             canvas.height = viewportHeight;
         }
+let isShooting = false; // Flag to prevent multiple shooting actions
+let shootInterval; // Variable to hold the interval ID
 
-        function setupInputHandlers() {
-            // Key events for movement
-            window.addEventListener('keydown', (e) => {
-                keys[e.key.toLowerCase()] = true;
-                if (e.key === ' ' && !isDead && gameStarted) {
-                    shoot();
+function setupInputHandlers() {
+    // Key events for movement and shooting
+    window.addEventListener('keydown', (e) => {
+        keys[e.key.toLowerCase()] = true;
+
+        // Handle shooting
+        if (e.key === ' ' && !isDead && gameStarted && !isShooting) {
+            shoot(); // Shoot immediately
+            isShooting = true; // Set the flag to true
+            shootInterval = setInterval(() => {
+                if (!isDead && gameStarted) {
+                    shoot(); // Shoot continuously
                 }
-            });
-            window.addEventListener('keyup', (e) => {
-                keys[e.key.toLowerCase()] = false;
-            });
-            
-            // Mouse events for aiming and shooting
-            canvas.addEventListener('mousemove', (e) => {
-                if (gameStarted) {
-                    mouseX = e.clientX;
-                    mouseY = e.clientY;
-                    isMouseAiming = true;
-                }
-            });
-            
-            canvas.addEventListener('mousedown', (e) => {
-                if (e.button === 0 && !isDead && gameStarted) {
-                    shoot();
-                }
-            });
-            
-            canvas.addEventListener('mouseout', () => {
-                isMouseAiming = false;
-            });
-            
-            document.getElementById('respawn-button').addEventListener('click', respawn);
+            }, 100); // Adjust the interval as needed (100ms for example)
         }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keys[e.key.toLowerCase()] = false;
+
+        // Reset shooting flag and clear interval when space is released
+        if (e.key === ' ') {
+            isShooting = false; // Reset the flag
+            clearInterval(shootInterval); // Stop continuous shooting
+        }
+    });
+
+    // Mouse events for aiming and shooting
+    canvas.addEventListener('mousemove', (e) => {
+        if (gameStarted) {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+            isMouseAiming = true;
+        }
+    });
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (e.button === 0 && !isDead && gameStarted) {
+            shoot(); // Shoot on mouse down
+            isShooting = true; // Set the flag
+            shootInterval = setInterval(() => {
+                if (!isDead && gameStarted) {
+                    shoot(); // Shoot continuously
+                }
+            }, 100); // Adjust the interval as needed
+        }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+        if (e.button === 0) {
+            isShooting = false; // Reset the flag
+            clearInterval(shootInterval); // Stop continuous shooting
+        }
+    });
+
+    canvas.addEventListener('mouseout', () => {
+        isMouseAiming = false;
+    });
+
+    document.getElementById('respawn-button').addEventListener('click', respawn);
+}
 
         function setupTouchControls() {
             const moveJoystick = document.getElementById('joystick');
@@ -536,7 +566,7 @@
 
         function gameLoop() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
+
             if (gameStarted) {
                 if (playerId in players) {
                     if (!isDead) {
@@ -553,7 +583,7 @@
                 // Draw a placeholder background
                 drawPlaceholderBackground();
             }
-            
+
             requestAnimationFrame(gameLoop);
         }
 
@@ -582,47 +612,53 @@
         }
 
         function handlePlayerInput() {
-            if (!(playerId in players) || !players[playerId].alive) return;
-            
-            let dx = 0, dy = 0;
-            const player = players[playerId];
-            const speed = 5;
-            
-            // Keyboard movement
-            if (keys['w'] || keys['arrowup']) dy -= speed;
-            if (keys['s'] || keys['arrowdown']) dy += speed;
-            if (keys['a'] || keys['arrowleft']) dx -= speed;
-            if (keys['d'] || keys['arrowright']) dx += speed;
-            
-            // Joystick movement (mobile)
-            if (isTouchingMove) {
-                dx = moveJoystickX * speed;
-                dy = moveJoystickY * speed;
-            }
-            
-            // Apply movement if there's any
-            if (dx !== 0 || dy !== 0) {
-                player.x = Math.max(30, Math.min(arenaSize - 30, player.x + dx));
-                player.y = Math.max(30, Math.min(arenaSize - 30, player.y + dy));
-                socket.emit('player_update', { player_id: playerId, x: player.x, y: player.y });
-            }
+    if (!(playerId in players) || !players[playerId].alive) return;
 
-            // Aim with mouse
-            if (isMouseAiming) {
-                const screenX = player.x - cameraX;
-                const screenY = player.y - cameraY;
-                const angle = Math.atan2(mouseY - screenY, mouseX - screenX);
-                player.angle = angle;
-                socket.emit('player_update', { player_id: playerId, angle: player.angle });
-            }
-            
-            // Aim with joystick
-            if (isTouchingAim && (aimJoystickX !== 0 || aimJoystickY !== 0)) {
-                const angle = Math.atan2(aimJoystickY, aimJoystickX);
-                player.angle = angle;
-                socket.emit('player_update', { player_id: playerId, angle: player.angle });
+    let dx = 0, dy = 0;
+    const player = players[playerId];
+    const speed = 5;
+
+    // Keyboard movement
+    if (keys['w'] || keys['arrowup']) dy -= speed;
+    if (keys['s'] || keys['arrowdown']) dy += speed;
+    if (keys['a'] || keys['arrowleft']) dx -= speed;
+    if (keys['d'] || keys['arrowright']) dx += speed;
+
+    // Joystick movement (mobile)
+    if (isTouchingMove) {
+        dx = moveJoystickX * speed;
+        dy = moveJoystickY * speed;
+    }
+
+    // Apply movement if there's any
+    if (dx !== 0 || dy !== 0) {
+        player.x = Math.max(30, Math.min(arenaSize - 30, player.x + dx));
+        player.y = Math.max(30, Math.min(arenaSize - 30, player.y + dy));
+        socket.emit('player_update', { player_id: playerId, x: player.x, y: player.y });
+    }
+
+    // Automatically aim at the nearest enemy
+    let nearestEnemy = null;
+    let nearestDistance = Infinity;
+
+    for (const id in players) {
+        if (id !== playerId && players[id].alive) {
+            const enemy = players[id];
+            const distance = Math.sqrt((enemy.x - player.x) ** 2 + (enemy.y - player.y) ** 2);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestEnemy = enemy;
             }
         }
+    }
+
+    // If there's a nearest enemy, calculate the angle
+    if (nearestEnemy) {
+        const angle = Math.atan2(nearestEnemy.y - player.y, nearestEnemy.x - player.x);
+        player.angle = angle;
+        socket.emit('player_update', { player_id: playerId, angle: player.angle });
+    }
+}
 
         function updateCamera() {
             if (!(playerId in players)) return;
@@ -775,11 +811,11 @@
         }
 
         function shoot() {
-            if (isDead) return;
-            const player = players[playerId];
-            if (!player || !player.alive) return;
-            socket.emit('shoot', { player_id: playerId, angle: player.angle });
-        }
+    if (isDead) return;
+    const player = players[playerId];
+    if (!player || !player.alive) return;
+    socket.emit('shoot', { player_id: playerId, angle: player.angle });
+}
 
         function handlePlayerDeath() {
             isDead = true;
@@ -826,34 +862,34 @@
         }
 
         function showNotification(message, color = 'blue') {
-            const container = document.getElementById('notifications-container');
-            const notification = document.createElement('div');
-            notification.className = 'kill-notification';
-            notification.textContent = message;
-            switch (color) {
-                case 'red':
-                    notification.style.borderLeftColor = '#ef4444';
-                    break;
-                case 'green':
-                    notification.style.borderLeftColor = '#22c55e';
-                    break;
-                case 'blue':
-                    notification.style.borderLeftColor = '#3b82f6';
-                    break;
-                case 'gray':
-                    notification.style.borderLeftColor = '#94a3b8';
-                    break;
-                default:
-                    notification.style.borderLeftColor = '#3b82f6';
-            }
-            container.appendChild(notification);
-            setTimeout(() => {
-                notification.style.opacity = '1';
-            }, 10);
-            setTimeout(() => {
-                notification.remove();
-            }, 3000);
-        }
+    const container = document.getElementById('notifications-container');
+    const notification = document.createElement('div');
+    notification.className = 'kill-notification';
+    notification.textContent = message;
+    switch (color) {
+        case 'red':
+            notification.style.borderLeftColor = '#ef4444';
+            break;
+        case 'green':
+            notification.style.borderLeftColor = '#22c55e';
+            break;
+        case 'blue':
+            notification.style.borderLeftColor = '#3b82f6';
+            break;
+        case 'gray':
+            notification.style.borderLeftColor = '#94a3b8';
+            break;
+        default:
+            notification.style.borderLeftColor = '#3b82f6';
+    }
+    container.appendChild(notification);
+    setTimeout(() => {
+        notification.style.opacity = '1';
+    }, 10);
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+}
 
         // Initialize game when DOM is loaded
         document.addEventListener('DOMContentLoaded', init);
